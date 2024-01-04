@@ -1,19 +1,21 @@
+import logging
+import time
 import vk_api
-from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-from vk_api.utils import get_random_id
-from vk_api.longpoll import VkLongPoll, VkEventType
+
+from db import get_random_question
 from environs import Env
 from redis import Redis
-from db import get_random_question
+from redis.exceptions import RedisError
+from vk_api.exceptions import VkApiError
+from vk_api.keyboard import VkKeyboard
+from vk_api.keyboard import VkKeyboardColor
+from vk_api.longpoll import VkEventType
+from vk_api.longpoll import VkLongPoll
+from vk_api.utils import get_random_id
 
 
-class VKError(Exception):
-    pass
-
-
-def vk_error_raise(response_json):
-    if response_json.get('error'):
-        raise VKError(response_json['error']['error_msg'])
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__file__)
 
 
 def check_answer(event, vk, db):
@@ -112,28 +114,40 @@ def main():
     env = Env()
     env.read_env()
     VK_TOKEN = env.str("VK_TOKEN")
-    redis_db = Redis(
-        host=env.str('REDIS_HOST'),
-        port=env.str('REDIS_PORT'),
-        # password=env.str('REDIS_PSW'),
-        db=0
-    )
 
-    vk_session = vk_api.VkApi(token=VK_TOKEN)
-    vk = vk_session.get_api()
-    longpoll = VkLongPoll(vk_session)
+    logger.setLevel(logging.DEBUG)
+    logger.info('vk polling bot started')
 
-    for event in longpoll.listen():
-        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
-            if event.text.lower() == 'новый вопрос':
-                new_question(event, vk, redis_db)
-            elif event.text.lower() == 'сдаться':
-                give_up(event, vk, redis_db)
-            elif event.text.lower() == 'мой счёт':
-                get_score(event, vk, redis_db)
-            else:
-                check_answer(event, vk, redis_db)
-
+    try:
+        redis_db = Redis(
+            host=env.str('REDIS_HOST'),
+            port=env.str('REDIS_PORT'),
+            # password=env.str('REDIS_PSW'),
+            db=0
+        )
+        vk_session = vk_api.VkApi(token=VK_TOKEN)
+        vk = vk_session.get_api()
+        longpoll = VkLongPoll(vk_session)
+        for event in longpoll.listen():
+            if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                if event.text.lower() == 'новый вопрос':
+                    new_question(event, vk, redis_db)
+                elif event.text.lower() == 'сдаться':
+                    give_up(event, vk, redis_db)
+                elif event.text.lower() == 'мой счёт':
+                    get_score(event, vk, redis_db)
+                else:
+                    check_answer(event, vk, redis_db)
+    except VkApiError as err:
+        logger.error(f"Vk api error: {err}")
+    except RedisError as err:
+        logger.error(f"Redis error : {err}")
+    except ConnectionError as err:
+        logger.exception(err)
+        time.sleep(30)
+    except Exception as exc:
+        logger.error(f"VkBot error: {exc}")
+  
 
 if __name__ == '__main__':
     main()

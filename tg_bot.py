@@ -1,13 +1,21 @@
+import logging
+import time
+
+from db import get_random_question
 from environs import Env
+from functools import partial
+from redis import Redis
+from redis.exceptions import RedisError
 from telegram import KeyboardButton
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import CommandHandler
 from telegram.ext import Filters
 from telegram.ext import MessageHandler
 from telegram.ext import Updater
-from redis import Redis
-from functools import partial
-from db import get_random_question
+
+
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__file__)
 
 
 def check_answer(update, context, db):
@@ -96,48 +104,57 @@ def main():
     env.read_env()
     tg_key = env.str('TG_API_KEY')
 
-    redis_db = Redis(
-        host=env.str('REDIS_HOST'),
-        port=env.str('REDIS_PORT'),
-        # password=env.str('REDIS_PSW'),
-        db=0
-    )
-
-    updater = Updater(tg_key, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(
-        CommandHandler(
-            "start", 
-            partial(start, db=redis_db)
+    try:
+        redis_db = Redis(
+            host=env.str('REDIS_HOST'),
+            port=env.str('REDIS_PORT'),
+            # password=env.str('REDIS_PSW'),
+            db=0
         )
-    )
 
-    new_question_handler = MessageHandler(
-        Filters.regex(r'^Новый вопрос$'), 
-        partial(new_question, db=redis_db)
-    )
-    dp.add_handler(new_question_handler)
+        updater = Updater(tg_key, use_context=True)
+        dp = updater.dispatcher
+        dp.add_handler(
+            CommandHandler(
+                "start", 
+                partial(start, db=redis_db)
+            )
+        )
 
-    give_up_handler = MessageHandler(
-        Filters.regex(r'^Сдаться$'), 
-        partial(give_up, db=redis_db)
-    )
-    dp.add_handler(give_up_handler)
+        new_question_handler = MessageHandler(
+            Filters.regex(r'^Новый вопрос$'), 
+            partial(new_question, db=redis_db)
+        )
+        dp.add_handler(new_question_handler)
 
-    get_score_handler = MessageHandler(
-        Filters.regex(r'^Мой счёт$'), 
-        partial(get_score, db=redis_db)
-    )
-    dp.add_handler(get_score_handler)    
-    
-    check_answer_handler = MessageHandler(
-        ~Filters.regex(r'^Новый вопрос$|^Сдаться$|^Мой счёт$'),
-        partial(check_answer, db=redis_db)
-    )
-    dp.add_handler(check_answer_handler)
+        give_up_handler = MessageHandler(
+            Filters.regex(r'^Сдаться$'), 
+            partial(give_up, db=redis_db)
+        )
+        dp.add_handler(give_up_handler)
 
-    updater.start_polling()
-    updater.idle()
+        get_score_handler = MessageHandler(
+            Filters.regex(r'^Мой счёт$'), 
+            partial(get_score, db=redis_db)
+        )
+        dp.add_handler(get_score_handler)    
+        
+        check_answer_handler = MessageHandler(
+            ~Filters.regex(r'^Новый вопрос$|^Сдаться$|^Мой счёт$'),
+            partial(check_answer, db=redis_db)
+        )
+        dp.add_handler(check_answer_handler)
+
+        updater.start_polling()
+        updater.idle()
+    except RedisError as err:
+        logger.error(f"Redis error : {err}")
+    except ConnectionError as err:
+        logger.exception(err)
+        time.sleep(30)
+    except Exception as exc:
+        logger.error(f"VkBot error: {exc}")
+
 
 
 if __name__ == '__main__':
