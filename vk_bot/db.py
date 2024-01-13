@@ -1,4 +1,3 @@
-import redis
 import random
 import os
 import re
